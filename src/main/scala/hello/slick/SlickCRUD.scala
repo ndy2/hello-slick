@@ -1,12 +1,12 @@
 package hello.slick
 
 import java.time.LocalDate
-import java.util.concurrent.Executors
+import java.util.concurrent.{ExecutorService, Executors}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object PrivateExecutionContext {
-  private val executors = Executors.newFixedThreadPool(4)
+  val executors: ExecutorService = Executors.newFixedThreadPool(4)
   implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(executors)
 }
 
@@ -17,6 +17,10 @@ object SlickCRUD extends App {
 
   val shawsharkRedemption = Movie(1L, "The Shawshank Redemption", LocalDate.of(1994, 9, 23), 162)
   val theMatrix = Movie(2L, "The Matrix", LocalDate.of(1999, 3, 31), 134)
+  val phantomMenace = Movie(10L, "Star Wars: A Phantom Menace", LocalDate.of(1999, 5, 16), 133)
+  val tomHanks = Actor(1L, "Tom Hanks")
+  val juliaRoberts = Actor(2L, "Julia Roberts")
+  val liamNeeson = Actor(3L, "Liam Neeson")
 
   def demoInsertMovie(): Unit = {
     val queryDescription = SlickTables.movieTable += theMatrix
@@ -25,8 +29,6 @@ object SlickCRUD extends App {
       case Success(newMovieId) => println(s"Query was successful, new id is $newMovieId")
       case Failure(ex)         => println(s"Query failed, reason: $ex")
     }
-
-    Thread.sleep(10000)
   }
 
   def demoReadAllMovies(): Unit = {
@@ -49,8 +51,6 @@ object SlickCRUD extends App {
       case Success(updateMovieId) => println(s"Update was successful, updated id is $updateMovieId")
       case Failure(ex)            => println(s"Update failed, reason: $ex")
     }
-
-    Thread.sleep(10000)
   }
 
   def demoDeleteMovie(): Unit = {
@@ -61,9 +61,45 @@ object SlickCRUD extends App {
       case Success(updateMovieId) => println(s"Delete was successful, updated id is $updateMovieId")
       case Failure(ex)            => println(s"Delete failed, reason: $ex")
     }
-
-    Thread.sleep(10000)
   }
-  
-  demoDeleteMovie()
+
+  def demoInsertActors(): Unit = {
+    val queryDescription = SlickTables.actorTable ++= Seq(tomHanks, juliaRoberts)
+    val futureId = Connection.db.run(queryDescription)
+
+    futureId.onComplete {
+      case Success(_)  => println(s"Insert was successful")
+      case Failure(ex) => println(s"Insert failed, reason: $ex")
+    }
+  }
+
+  def multipleQueriesSingleTransaction(): Unit = {
+    val insertMovie = SlickTables.movieTable += phantomMenace
+    val insertActor = SlickTables.actorTable += liamNeeson
+
+    val queryDescription = DBIO.seq(insertMovie, insertActor)
+    Connection.db.run(queryDescription.transactionally).onComplete {
+      case Success(_)  => println(s"Insert was successful")
+      case Failure(ex) => println(s"Insert failed, reason: $ex")
+    }
+  }
+
+  def findAllActorsByMovie(movieId: Long): Future[Seq[Actor]] = {
+    val joinQuery = SlickTables.movieActorMappingTable
+      .filter(_.movieId === movieId)
+      .join(SlickTables.actorTable)
+      .on(_.actorId === _.id) // select * from movieActorMappingTable m join actorTable a on m.actorId == a.id
+      .map(_._2)
+
+    Connection.db.run(joinQuery.result)
+  }
+
+//  multipleQueriesSingleTransaction()
+  findAllActorsByMovie(4L).onComplete {
+    case Success(actors) => println(s"Actors from Star Warrs : $actors")
+    case Failure(ex)     => println(s"Query failed. reason : $ex")
+  }
+
+  Thread.sleep(10000)
+  PrivateExecutionContext.executors.shutdown()
 }
